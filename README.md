@@ -15,5 +15,9 @@ recommendation
 charts
 ![image](https://github.com/user-attachments/assets/4874c64d-d348-4927-bdc9-82530f83f6ca)
 
+Hypothesis test
+![image](https://github.com/user-attachments/assets/65bb9a3e-fed4-419e-a714-827dfa6f13e9)
+
+
 
 
