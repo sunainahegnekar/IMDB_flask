@@ -27,25 +27,48 @@ app = Flask(__name__)
 # Load and clean the dataset
 try:
     df = pd.read_csv("https://raw.githubusercontent.com/krishna-koly/IMDB_TOP_1000/main/imdb_top_1000.csv")
-    df['runtime'] = df['Runtime'].str.extract(r'(\d+)').astype(float)
-    df['gross'] = df['Gross'].str.replace(',', '', regex=True).astype(float)
-    df.columns = df.columns.str.strip().str.lower()
+    # Ensure unique column names by making them lowercase and stripping spaces
+    df.columns = [col.lower().strip() for col in df.columns]
+    # Check for duplicates and raise an error if found
+    if df.columns.duplicated().any():
+        raise ValueError("Duplicate column names detected in DataFrame")
+    df['runtime'] = df['runtime'].str.extract(r'(\d+)').astype(float)  # Fix: Use existing 'runtime' column
+    df['gross'] = df['gross'].str.replace(',', '', regex=True).astype(float)  # Fix: Use existing 'gross' column
 except Exception as e:
     print(f"Error loading dataset: {e}")
     exit(1)
 
-def top_movies_by_genre(genre, df, top_n=5, sort_order='descending'):
+def top_movies_by_genre(genre, df, top_n=5, sort_by='imdb_rating', sort_order='descending'):
     try:
         df['genre'] = df['genre'].str.lower()
         filtered = df[df['genre'].str.split(', ').apply(lambda x: any(genre.lower() in g for g in x))]
         if filtered.empty:
             return None
+        valid_sort_cols = ['imdb_rating', 'runtime', 'gross', 'no_of_votes']
+        if sort_by not in valid_sort_cols:
+            sort_by = 'imdb_rating'
         if sort_order == 'ascending':
-            return filtered.sort_values(by='imdb_rating', ascending=True).head(top_n)[['series_title', 'genre', 'imdb_rating']]
-        else:  # default to descending
-            return filtered.sort_values(by='imdb_rating', ascending=False).head(top_n)[['series_title', 'genre', 'imdb_rating']]
+            return filtered.sort_values(by=sort_by, ascending=True).head(top_n)[['series_title', 'genre', 'imdb_rating', 'runtime', 'gross', 'no_of_votes']]
+        else:
+            return filtered.sort_values(by=sort_by, ascending=False).head(top_n)[['series_title', 'genre', 'imdb_rating', 'runtime', 'gross', 'no_of_votes']]
     except Exception as e:
         print(f"Error in top_movies_by_genre: {e}")
+        return None
+
+def predict_rating(runtime, gross, votes):
+    try:
+        # Apply between to individual Series with proper boolean indexing
+        mask = (
+            (df['runtime'].between(runtime - 20, runtime + 20, inclusive='both')) &
+            (df['gross'].between(gross - 10000000, gross + 10000000, inclusive='both')) &
+            (df['no_of_votes'].between(votes - 50000, votes + 50000, inclusive='both'))
+        )
+        filtered_df = df[mask]
+        if len(filtered_df) > 0:
+            return filtered_df['imdb_rating'].mean()
+        return df['imdb_rating'].mean()  # Fallback to overall average
+    except Exception as e:
+        print(f"Error in prediction: {e}")
         return None
 
 @app.route('/')
@@ -80,9 +103,14 @@ def genre():
     movies = None
     genre_input = ''
     top_n = 5
+    sort_by = 'imdb_rating'
     sort_order = 'descending'
     genre_options = ['Action', 'Comedy', 'Drama', 'Horror', 'Adventure']
     sort_options = ['descending', 'ascending']
+    sort_by_options = ['imdb_rating', 'runtime', 'gross', 'no_of_votes']
+    prediction = None
+    pred_error = None
+
     try:
         if request.method == 'POST':
             genre_input = request.form.get('genre', '').strip()
@@ -92,10 +120,26 @@ def genre():
                     top_n = 5
             except ValueError:
                 top_n = 5
+            sort_by = request.form.get('sort_by', 'imdb_rating')
             sort_order = request.form.get('sort_order', 'descending')
+            print(f"Genre: {genre_input}, Top N: {top_n}, Sort By: {sort_by}, Sort Order: {sort_order}")
             if genre_input in genre_options:
-                movies = top_movies_by_genre(genre_input, df, top_n, sort_order)
-        return render_template('genre.html', movies=movies, genre_input=genre_input, top_n=top_n, genre_options=genre_options, sort_order=sort_order, sort_options=sort_options)
+                movies = top_movies_by_genre(genre_input, df, top_n, sort_by, sort_order)
+                print(f"Movies retrieved: {movies.shape if movies is not None else 'None'}")
+
+            if request.form.get('predict'):
+                try:
+                    runtime = float(request.form.get('pred_runtime', 0))
+                    gross = float(request.form.get('pred_gross', 0))
+                    votes = float(request.form.get('pred_votes', 0))
+                    print(f"Prediction inputs - Runtime: {runtime}, Gross: {gross}, Votes: {votes}")
+                    prediction = predict_rating(runtime, gross, votes)
+                    if prediction is None:
+                        pred_error = "Prediction failed. Please check input values."
+                except ValueError:
+                    pred_error = "Invalid input for prediction. Please enter numeric values."
+
+        return render_template('genre.html', movies=movies, genre_input=genre_input, top_n=top_n, genre_options=genre_options, sort_order=sort_order, sort_options=sort_options, sort_by=sort_by, sort_by_options=sort_by_options, prediction=prediction, pred_error=pred_error)
     except Exception as e:
         return render_template('error.html', error=f"Error processing genre search: {str(e)}")
 
@@ -116,12 +160,7 @@ def hypothesis():
         }
         return render_template('hypothesis.html', result=result)
     except Exception as e:
-        return render_template('hypothesis.html', result={
-            't_statistic': 'N/A',
-            'p_value': 'N/A',
-            'significant': False,
-            'error': str(e)
-        })
+        return render_template('error.html', error=f"Error generating hypothesis: {str(e)}")
 
 @app.route('/charts')
 def charts():
