@@ -1,5 +1,4 @@
-Check it on : https://imdb-flask-app.onrender.com
-command to run : python app.py
+Check it on : https://imdb-flask-1.onrender.com/
 
 home
 ![image](https://github.com/user-attachments/assets/f0e514af-9f27-427f-88df-2fea2b1a6fa8)
