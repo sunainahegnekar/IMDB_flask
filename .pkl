@@ -1,0 +1,113 @@
+
+from flask import Flask, render_template, request
+import pandas as pd
+from scipy import stats
+from sklearn.linear_model import LinearRegression
+from sklearn.impute import SimpleImputer
+import numpy as np
+import joblib
+import os
+
+app = Flask(__name__)
+
+# Check for required libraries
+try:
+    from flask import Flask, render_template, request
+except ImportError as e:
+    print("Error: Flask is not installed. Please install it using 'pip install flask'.")
+    exit(1)
+
+try:
+    import pandas as pd
+except ImportError as e:
+    print("Error: pandas is not installed. Please install it using 'pip install pandas'.")
+    exit(1)
+
+try:
+    from scipy import stats
+except ImportError as e:
+    print("Error: scipy is not installed. Please install it using 'pip install scipy'.")
+    exit(1)
+
+try:
+    from sklearn.linear_model import LinearRegression
+    from sklearn.impute import SimpleImputer
+    import joblib
+except ImportError as e:
+    print("Error: scikit-learn or joblib is not installed. Please install it using 'pip install scikit-learn joblib'.")
+    exit(1)
+
+# Load and clean the dataset
+try:
+    df = pd.read_csv("https://raw.githubusercontent.com/krishna-koly/IMDB_TOP_1000/main/imdb_top_1000.csv")
+    df.columns = [col.lower().strip() for col in df.columns]
+    if df.columns.duplicated().any():
+        raise ValueError("Duplicate column names detected in DataFrame")
+    df['runtime'] = df['runtime'].str.extract(r'(\d+)').astype(float)
+    df['gross'] = df['gross'].str.replace(',', '', regex=True).astype(float)
+except Exception as e:
+    print(f"Error loading dataset: {e}")
+    exit(1)
+
+# Paths for saving/loading model and imputer
+MODEL_PATH = 'reg_model.pkl'
+IMPUTER_PATH = 'imputer.pkl'
+
+# Prepare data for regression and load/train model
+try:
+    # Select features and target
+    features = ['runtime', 'gross', 'no_of_votes']
+    target = 'imdb_rating'
+    
+    # Create a copy of the dataset for regression
+    df_reg = df[features + [target]].dropna()
+    
+    # Check if model and imputer exist
+    if os.path.exists(MODEL_PATH) and os.path.exists(IMPUTER_PATH):
+        print("Loading pre-trained model and imputer...")
+        reg_model = joblib.load(MODEL_PATH)
+        imputer = joblib.load(IMPUTER_PATH)
+    else:
+        print("Training new model and imputer...")
+        # Handle missing values using SimpleImputer
+        imputer = SimpleImputer(strategy='mean')
+        X = imputer.fit_transform(df_reg[features])
+        y = df_reg[target]
+        
+        # Train the regression model
+        reg_model = LinearRegression()
+        reg_model.fit(X, y)
+        
+        # Save the model and imputer
+        joblib.dump(reg_model, MODEL_PATH)
+        joblib.dump(imputer, IMPUTER_PATH)
+        print(f"Model saved to {MODEL_PATH}, Imputer saved to {IMPUTER_PATH}")
+except Exception as e:
+    print(f"Error training or loading regression model: {e}")
+    exit(1)
+
+def predict_rating(runtime, gross, votes):
+    try:
+        # Prepare input data for prediction
+        input_data = np.array([[runtime, gross, votes]])
+        
+        # Impute missing values if any
+        input_data = imputer.transform(input_data)
+        
+        # Predict using the trained model
+        prediction = reg_model.predict(input_data)[0]
+        
+        # Ensure prediction is within a reasonable range (0 to 10 for IMDb ratings)
+        prediction = max(0, min(10, prediction))
+        return round(prediction, 2)
+    except Exception as e:
+        print(f"Error in prediction: {e}")
+        return None
+
+# Rest of the code (routes, top_movies_by_genre, etc.) remains unchanged
+# ... [Include your existing routes and other functions here] ...
+
+if __name__ == '__main__':
+    import os
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
