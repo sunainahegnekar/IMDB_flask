@@ -1,9 +1,13 @@
 from flask import Flask, render_template, request
 import pandas as pd
 from scipy import stats
+from sklearn.linear_model import LinearRegression
+from sklearn.impute import SimpleImputer
+import numpy as np
 
 app = Flask(__name__)
 
+# Check for required libraries
 try:
     from flask import Flask, render_template, request
 except ImportError as e:
@@ -22,20 +26,44 @@ except ImportError as e:
     print("Error: scipy is not installed. Please install it using 'pip install scipy'.")
     exit(1)
 
-app = Flask(__name__)
+try:
+    from sklearn.linear_model import LinearRegression
+    from sklearn.impute import SimpleImputer
+except ImportError as e:
+    print("Error: scikit-learn is not installed. Please install it using 'pip install scikit-learn'.")
+    exit(1)
 
 # Load and clean the dataset
 try:
     df = pd.read_csv("https://raw.githubusercontent.com/krishna-koly/IMDB_TOP_1000/main/imdb_top_1000.csv")
-    # Ensure unique column names by making them lowercase and stripping spaces
     df.columns = [col.lower().strip() for col in df.columns]
-    # Check for duplicates and raise an error if found
     if df.columns.duplicated().any():
         raise ValueError("Duplicate column names detected in DataFrame")
-    df['runtime'] = df['runtime'].str.extract(r'(\d+)').astype(float)  # Fix: Use existing 'runtime' column
-    df['gross'] = df['gross'].str.replace(',', '', regex=True).astype(float)  # Fix: Use existing 'gross' column
+    df['runtime'] = df['runtime'].str.extract(r'(\d+)').astype(float)
+    df['gross'] = df['gross'].str.replace(',', '', regex=True).astype(float)
 except Exception as e:
     print(f"Error loading dataset: {e}")
+    exit(1)
+
+# Prepare data for regression
+try:
+    # Select features and target
+    features = ['runtime', 'gross', 'no_of_votes']
+    target = 'imdb_rating'
+    
+    # Create a copy of the dataset for regression
+    df_reg = df[features + [target]].dropna()
+    
+    # Handle missing values using SimpleImputer (though dropna already removes them)
+    imputer = SimpleImputer(strategy='mean')
+    X = imputer.fit_transform(df_reg[features])
+    y = df_reg[target]
+    
+    # Train the regression model
+    reg_model = LinearRegression()
+    reg_model.fit(X, y)
+except Exception as e:
+    print(f"Error training regression model: {e}")
     exit(1)
 
 def top_movies_by_genre(genre, df, top_n=5, sort_by='imdb_rating', sort_order='descending'):
@@ -57,16 +85,18 @@ def top_movies_by_genre(genre, df, top_n=5, sort_by='imdb_rating', sort_order='d
 
 def predict_rating(runtime, gross, votes):
     try:
-        # Apply between to individual Series with proper boolean indexing
-        mask = (
-            (df['runtime'].between(runtime - 20, runtime + 20, inclusive='both')) &
-            (df['gross'].between(gross - 10000000, gross + 10000000, inclusive='both')) &
-            (df['no_of_votes'].between(votes - 50000, votes + 50000, inclusive='both'))
-        )
-        filtered_df = df[mask]
-        if len(filtered_df) > 0:
-            return filtered_df['imdb_rating'].mean()
-        return df['imdb_rating'].mean()  # Fallback to overall average
+        # Prepare input data for prediction
+        input_data = np.array([[runtime, gross, votes]])
+        
+        # Impute missing values if any (though inputs should be valid)
+        input_data = imputer.transform(input_data)
+        
+        # Predict using the trained model
+        prediction = reg_model.predict(input_data)[0]
+        
+        # Ensure prediction is within a reasonable range (e.g., 0 to 10 for IMDb ratings)
+        prediction = max(0, min(10, prediction))
+        return round(prediction, 2)
     except Exception as e:
         print(f"Error in prediction: {e}")
         return None
@@ -91,7 +121,7 @@ def statistics():
         stats = df.describe(include='all').T[['count', 'mean', 'std', 'min', '25%', '50%', '75%', 'max']].to_dict()
         unique_values = {
             'series_title': df['series_title'].nunique(),
-            'director': df['director'].nunique(),
+            ' Dış: df['director'].nunique(),
             'genres': df['genre'].nunique()
         }
         return render_template('statistics.html', stats=stats, unique_values=unique_values)
